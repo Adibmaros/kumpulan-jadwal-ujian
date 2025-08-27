@@ -1,21 +1,9 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+"use client";
+
 import "./globals.css";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
-export const metadata: Metadata = {
-  title: "Kumpulan Jadwal Ujian",
-  description: "Created By Adib Muhammad Maros",
-};
+const queryClient = new QueryClient();
 
 export default function RootLayout({
   children,
@@ -24,7 +12,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>{children}</body>
+      <body>
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      </body>
     </html>
   );
 }

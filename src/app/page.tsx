@@ -4,100 +4,62 @@
 import Error from "@/components/Error";
 import Loading from "@/components/Loading";
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 export default function HomePage() {
-  const [images, setImages] = useState<string[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [selectedImage, setSelectedImage] = useState<{ src: string; index: number } | null>(null);
   const [imageLoadingStates, setImageLoadingStates] = useState<Record<number, boolean>>({});
   const [selectedYear, setSelectedYear] = useState<string>("semua");
   const [allImages, setAllImages] = useState<{ src: string; year: string }[]>([]);
   const [availableYears, setAvailableYears] = useState<string[]>([]);
-  const itemsPerPage = 9; // 3x3 grid per halaman
+  const [images, setImages] = useState<string[]>([]);
+  const itemsPerPage = 9;
 
+  // Query data dari /api/data
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ["jadwal-ujian"],
+    queryFn: async () => {
+      const res = await fetch("/api/data");
+      if (!res.ok) throw Error("Gagal memuat data");
+      return res.json();
+    },
+    staleTime: 1000 * 60 * 5,
+  });
+
+  // Proses data setelah query sukses
   useEffect(() => {
-    async function fetchData() {
-      try {
-        setLoading(true);
-        // Gunakan path absolut yang lebih reliable untuk production
-        const baseUrl = process.env.NODE_ENV === "production" ? "" : "";
-        const res = await fetch(`${baseUrl}/data/data-ujian.json`, {
-          cache: "no-store", // Untuk memastikan data selalu fresh
-          headers: {
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            Pragma: "no-cache",
-            Expires: "0",
-          },
-        });
-
-        if (!res.ok) {
-          throw Error(`HTTP error! status: ${res.status}`);
-        }
-
-        const data = await res.json();
-
-        // Filter hanya item dengan judul mengandung "jadwal ujian"
-        const filtered = data.filter((item: any) => typeof item.judul === "string" && item.judul.toLowerCase().includes("jadwal ujian"));
-
-        // Ekstrak URL gambar dari field detail dengan tahun
-        const imageData: { src: string; year: string }[] = [];
-        filtered.forEach((item: any) => {
-          if (item.detail) {
-            const regex = /<img[^>]+src="([^">]+)"/g;
-            let match;
-
-            // Extract year from created_at or updated_at
-            const itemDate = new Date(item.created_at || item.updated_at);
-            const year = itemDate.getFullYear().toString();
-
-            while ((match = regex.exec(item.detail)) !== null) {
-              let imageUrl = match[1];
-
-              // Normalize URL untuk memastikan konsistensi
-              if (imageUrl.startsWith("//")) {
-                imageUrl = "https:" + imageUrl;
-              } else if (imageUrl.startsWith("/")) {
-                imageUrl = window.location.origin + imageUrl;
-              } else if (!imageUrl.startsWith("http")) {
-                // Jika URL relatif, tambahkan base URL
-                imageUrl = window.location.origin + "/" + imageUrl.replace(/^\.\//, "");
-              }
-
-              imageData.push({ src: imageUrl, year });
-            }
+    if (!data) return;
+    // Filter hanya item dengan judul mengandung "jadwal ujian"
+    const filtered = data.filter((item: any) => typeof item.judul === "string" && item.judul.toLowerCase().includes("jadwal ujian"));
+    // Ekstrak URL gambar dari field detail dengan tahun
+    const imageData: { src: string; year: string }[] = [];
+    filtered.forEach((item: any) => {
+      if (item.detail) {
+        const regex = /<img[^>]+src="([^">]+)"/g;
+        let match;
+        const itemDate = new Date(item.created_at || item.updated_at);
+        const year = itemDate.getFullYear().toString();
+        while ((match = regex.exec(item.detail)) !== null) {
+          let imageUrl = match[1];
+          if (imageUrl.startsWith("//")) {
+            imageUrl = "https:" + imageUrl;
+          } else if (imageUrl.startsWith("/")) {
+            imageUrl = window.location.origin + imageUrl;
+          } else if (!imageUrl.startsWith("http")) {
+            imageUrl = window.location.origin + "/" + imageUrl.replace(/^\.\//, "");
           }
-        });
-
-        // Sort by year descending
-        imageData.sort((a, b) => parseInt(b.year) - parseInt(a.year));
-
-        // Extract unique years and sort them
-        const years = [...new Set(imageData.map((img) => img.year))].sort((a, b) => parseInt(b) - parseInt(a));
-
-        setAllImages(imageData);
-        setAvailableYears(years);
-
-        // Set initial filtered images
-        setImages(imageData.map((img) => img.src));
-
-        console.log("Extracted image data:", imageData); // Debug log
-        console.log("Available years:", years); // Debug log
-      } catch (err: unknown) {
-        console.error("Fetch error:", err);
-        if (err && typeof err === "object" && "message" in err) {
-          setError((err as { message?: string }).message ?? "Terjadi kesalahan saat memuat data");
-        } else {
-          setError("Terjadi kesalahan saat memuat data");
+          imageData.push({ src: imageUrl, year });
         }
-      } finally {
-        setLoading(false);
       }
-    }
-
-    fetchData();
-  }, []);
+    });
+    imageData.sort((a, b) => parseInt(b.year) - parseInt(a.year));
+    const years = [...new Set(imageData.map((img) => img.year))].sort((a, b) => parseInt(b) - parseInt(a));
+    setAllImages(imageData);
+    setAvailableYears(years);
+    // Set initial filtered images
+    setImages(imageData.map((img) => img.src));
+  }, [data]);
 
   // Filter images by selected year
   useEffect(() => {
@@ -107,7 +69,6 @@ export default function HomePage() {
       const filteredImages = allImages.filter((img) => img.year === selectedYear);
       setImages(filteredImages.map((img) => img.src));
     }
-    // Reset to first page when filter changes
     setCurrentPage(1);
   }, [selectedYear, allImages]);
 
@@ -246,13 +207,8 @@ export default function HomePage() {
     }
   };
 
-  if (loading) {
-    return <Loading />;
-  }
-
-  if (error) {
-    return <Error error={error} />;
-  }
+  if (isLoading) return <Loading />;
+  if (isError) return <Error error={error instanceof Error ? error.message : "Terjadi kesalahan"} />;
 
   return (
     <>
@@ -307,7 +263,7 @@ export default function HomePage() {
           {/* Grid Gambar */}
           {currentImages.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8 mb-8 sm:mb-12">
-              {currentImages.map((src, idx) => {
+              {currentImages.map((src: string, idx: number) => {
                 const globalIndex = startIndex + idx;
                 return (
                   <div
@@ -510,18 +466,15 @@ export default function HomePage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
-
             {/* Header modal */}
             <div className="absolute -top-10 sm:-top-12 left-0 text-white mb-4">
               <h3 className="text-base sm:text-lg font-semibold">Jadwal Ujian #{selectedImage.index + 1}</h3>
             </div>
-
             {/* Gambar */}
             <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl overflow-hidden max-h-[85vh] sm:max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
               <div className="flex-1 overflow-hidden flex items-center justify-center">
                 <img src={selectedImage.src} alt={`Jadwal Ujian ${selectedImage.index + 1}`} className="w-full h-auto max-h-full object-contain" onError={(e) => handleImageError(e, selectedImage.src)} />
               </div>
-
               {/* Footer modal */}
               <div className="p-3 sm:p-4 bg-gray-50 border-t flex-shrink-0">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
