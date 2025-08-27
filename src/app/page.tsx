@@ -1,6 +1,8 @@
 // app/page.tsx
 "use client";
 
+import Error from "@/components/Error";
+import Loading from "@/components/Loading";
 import { useEffect, useState } from "react";
 
 export default function HomePage() {
@@ -9,6 +11,10 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [selectedImage, setSelectedImage] = useState<{ src: string; index: number } | null>(null);
+  const [imageLoadingStates, setImageLoadingStates] = useState<Record<number, boolean>>({});
+  const [selectedYear, setSelectedYear] = useState<string>("semua");
+  const [allImages, setAllImages] = useState<{ src: string; year: string }[]>([]);
+  const [availableYears, setAvailableYears] = useState<string[]>([]);
   const itemsPerPage = 9; // 3x3 grid per halaman
 
   useEffect(() => {
@@ -27,7 +33,7 @@ export default function HomePage() {
         });
 
         if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
+          throw Error(`HTTP error! status: ${res.status}`);
         }
 
         const data = await res.json();
@@ -35,12 +41,17 @@ export default function HomePage() {
         // Filter hanya item dengan judul mengandung "jadwal ujian"
         const filtered = data.filter((item: any) => typeof item.judul === "string" && item.judul.toLowerCase().includes("jadwal ujian"));
 
-        // Ekstrak URL gambar dari field detail
-        const urls: string[] = [];
+        // Ekstrak URL gambar dari field detail dengan tahun
+        const imageData: { src: string; year: string }[] = [];
         filtered.forEach((item: any) => {
           if (item.detail) {
             const regex = /<img[^>]+src="([^">]+)"/g;
             let match;
+
+            // Extract year from created_at or updated_at
+            const itemDate = new Date(item.created_at || item.updated_at);
+            const year = itemDate.getFullYear().toString();
+
             while ((match = regex.exec(item.detail)) !== null) {
               let imageUrl = match[1];
 
@@ -54,16 +65,32 @@ export default function HomePage() {
                 imageUrl = window.location.origin + "/" + imageUrl.replace(/^\.\//, "");
               }
 
-              urls.push(imageUrl);
+              imageData.push({ src: imageUrl, year });
             }
           }
         });
 
-        console.log("Extracted URLs:", urls); // Debug log
-        setImages(urls);
-      } catch (err) {
+        // Sort by year descending
+        imageData.sort((a, b) => parseInt(b.year) - parseInt(a.year));
+
+        // Extract unique years and sort them
+        const years = [...new Set(imageData.map((img) => img.year))].sort((a, b) => parseInt(b) - parseInt(a));
+
+        setAllImages(imageData);
+        setAvailableYears(years);
+
+        // Set initial filtered images
+        setImages(imageData.map((img) => img.src));
+
+        console.log("Extracted image data:", imageData); // Debug log
+        console.log("Available years:", years); // Debug log
+      } catch (err: unknown) {
         console.error("Fetch error:", err);
-        setError(err instanceof Error ? err.message : "Terjadi kesalahan saat memuat data");
+        if (err && typeof err === "object" && "message" in err) {
+          setError((err as { message?: string }).message ?? "Terjadi kesalahan saat memuat data");
+        } else {
+          setError("Terjadi kesalahan saat memuat data");
+        }
       } finally {
         setLoading(false);
       }
@@ -71,6 +98,27 @@ export default function HomePage() {
 
     fetchData();
   }, []);
+
+  // Filter images by selected year
+  useEffect(() => {
+    if (selectedYear === "semua") {
+      setImages(allImages.map((img) => img.src));
+    } else {
+      const filteredImages = allImages.filter((img) => img.year === selectedYear);
+      setImages(filteredImages.map((img) => img.src));
+    }
+    // Reset to first page when filter changes
+    setCurrentPage(1);
+  }, [selectedYear, allImages]);
+
+  // Handle image loading states
+  const handleImageLoadStart = (index: number) => {
+    setImageLoadingStates((prev) => ({ ...prev, [index]: true }));
+  };
+
+  const handleImageLoadComplete = (index: number) => {
+    setImageLoadingStates((prev) => ({ ...prev, [index]: false }));
+  };
 
   // Hitung total halaman
   const totalPages = Math.ceil(images.length / itemsPerPage);
@@ -94,6 +142,26 @@ export default function HomePage() {
   // Fungsi untuk menutup modal
   const closeModal = () => {
     setSelectedImage(null);
+  };
+
+  // Fungsi untuk download gambar
+  const downloadImage = async (imageUrl: string, filename: string) => {
+    try {
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Error downloading image:", error);
+      // Fallback: open image in new tab
+      window.open(imageUrl, "_blank");
+    }
   };
 
   // Fungsi navigasi pagination
@@ -179,45 +247,11 @@ export default function HomePage() {
   };
 
   if (loading) {
-    return (
-      <main className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
-        <div className="container mx-auto px-3 sm:px-6 lg:px-8 py-8 sm:py-16">
-          <div className="text-center">
-            <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 mb-4 sm:mb-6 bg-white rounded-full shadow-lg">
-              <div className="animate-spin rounded-full h-8 w-8 sm:h-10 sm:w-10 border-4 border-indigo-200 border-t-indigo-600"></div>
-            </div>
-            <h2 className="text-xl sm:text-2xl font-semibold text-gray-700 mb-2">Memuat Jadwal Ujian</h2>
-            <p className="text-sm sm:text-base text-gray-500">Mohon tunggu sebentar...</p>
-          </div>
-        </div>
-      </main>
-    );
+    return <Loading />;
   }
 
   if (error) {
-    return (
-      <main className="min-h-screen bg-gradient-to-br from-red-50 via-rose-50 to-pink-50">
-        <div className="container mx-auto px-3 sm:px-6 lg:px-8 py-8 sm:py-16">
-          <div className="max-w-sm sm:max-w-md mx-auto">
-            <div className="bg-white rounded-2xl shadow-xl p-6 sm:p-8 text-center border border-red-100">
-              <div className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-4 sm:mb-6 bg-red-100 rounded-full flex items-center justify-center">
-                <svg className="w-6 h-6 sm:w-8 sm:h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-3">Gagal Memuat Data</h2>
-              <p className="text-sm sm:text-base text-gray-600 mb-6">{error}</p>
-              <button
-                onClick={() => window.location.reload()}
-                className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
-              >
-                Coba Lagi
-              </button>
-            </div>
-          </div>
-        </div>
-      </main>
-    );
+    return <Error error={error} />;
   }
 
   return (
@@ -236,8 +270,37 @@ export default function HomePage() {
               <span className="inline-flex items-center bg-yellow-100 text-yellow-800 text-sm font-semibold px-4 py-2 rounded-xl border border-yellow-200 shadow">⚠️ Disarankan menggunakan laptop/PC untuk pengalaman terbaik!</span>
             </div>
             <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent mb-4">Kumpulan Jadwal Ujian</h1>
+
+            {/* Filter Tahun */}
+            {availableYears.length > 0 && (
+              <div className="mb-6">
+                <div className="flex flex-wrap items-center justify-center gap-2 max-w-4xl mx-auto px-4">
+                  <span className="text-sm font-medium text-gray-600 mr-2">Filter Tahun:</span>
+                  <button
+                    onClick={() => setSelectedYear("semua")}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${selectedYear === "semua" ? "bg-indigo-600 text-white shadow-md" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+                  >
+                    Semua ({allImages.length})
+                  </button>
+                  {availableYears.map((year) => {
+                    const yearCount = allImages.filter((img) => img.year === year).length;
+                    return (
+                      <button
+                        key={year}
+                        onClick={() => setSelectedYear(year)}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${selectedYear === year ? "bg-indigo-600 text-white shadow-md" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+                      >
+                        {year} ({yearCount})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <p className="text-base sm:text-lg lg:text-xl text-gray-600 max-w-2xl mx-auto px-4">
               Menampilkan <span className="font-semibold text-indigo-600">{currentImages.length}</span> dari <span className="font-semibold text-indigo-600">{images.length}</span> jadwal ujian
+              {selectedYear !== "semua" && <span className="text-indigo-500"> tahun {selectedYear}</span>}
             </p>
           </div>
 
@@ -252,18 +315,33 @@ export default function HomePage() {
                     className="group relative bg-white rounded-xl sm:rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-500 overflow-hidden border border-gray-100 transform hover:-translate-y-1 sm:hover:-translate-y-2"
                   >
                     <div className="relative overflow-hidden">
+                      {/* Loading skeleton */}
+                      {imageLoadingStates[globalIndex] && (
+                        <div className="absolute inset-0 bg-gray-200 animate-pulse flex items-center justify-center">
+                          <div className="text-center">
+                            <div className="animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-indigo-600 mb-2 mx-auto"></div>
+                            <p className="text-gray-500 text-xs">Memuat gambar...</p>
+                          </div>
+                        </div>
+                      )}
+
                       <img
                         src={src}
                         alt={`Jadwal Ujian ${globalIndex + 1}`}
                         className="w-full h-48 sm:h-64 lg:h-80 object-cover group-hover:scale-105 sm:group-hover:scale-110 transition-transform duration-700 sm:cursor-pointer select-none"
                         loading="lazy"
+                        onLoadStart={() => handleImageLoadStart(globalIndex)}
+                        onLoad={() => handleImageLoadComplete(globalIndex)}
+                        onError={(e) => {
+                          handleImageLoadComplete(globalIndex);
+                          handleImageError(e, src);
+                        }}
                         onClick={(e) => {
                           // Only work on desktop
                           if (window.innerWidth >= 640) {
                             openImageModal(src, globalIndex);
                           }
                         }}
-                        onError={(e) => handleImageError(e, src)}
                       />
 
                       {/* Gradient overlay */}
@@ -452,6 +530,15 @@ export default function HomePage() {
                     <p className="text-xs sm:text-sm text-gray-600">Klik di luar gambar atau tekan ESC untuk menutup</p>
                   </div>
                   <div className="flex gap-2 justify-center sm:justify-end">
+                    <button
+                      onClick={() => downloadImage(selectedImage.src, `Jadwal_Ujian_${selectedImage.index + 1}.jpg`)}
+                      className="flex-1 sm:flex-none bg-green-600 hover:bg-green-700 text-white px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      Download
+                    </button>
                     <button onClick={() => window.open(selectedImage.src, "_blank")} className="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 text-white px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors">
                       Buka di Tab Baru
                     </button>
