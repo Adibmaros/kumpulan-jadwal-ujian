@@ -15,7 +15,16 @@ export default function HomePage() {
     async function fetchData() {
       try {
         setLoading(true);
-        const res = await fetch("/data/data-ujian.json");
+        // Gunakan path absolut yang lebih reliable untuk production
+        const baseUrl = process.env.NODE_ENV === "production" ? "" : "";
+        const res = await fetch(`${baseUrl}/data/data-ujian.json`, {
+          cache: "no-store", // Untuk memastikan data selalu fresh
+          headers: {
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            Pragma: "no-cache",
+            Expires: "0",
+          },
+        });
 
         if (!res.ok) {
           throw new Error(`HTTP error! status: ${res.status}`);
@@ -29,16 +38,32 @@ export default function HomePage() {
         // Ekstrak URL gambar dari field detail
         const urls: string[] = [];
         filtered.forEach((item: any) => {
-          const regex = /<img[^>]+src="([^">]+)"/g;
-          let match;
-          while ((match = regex.exec(item.detail)) !== null) {
-            urls.push(match[1]);
+          if (item.detail) {
+            const regex = /<img[^>]+src="([^">]+)"/g;
+            let match;
+            while ((match = regex.exec(item.detail)) !== null) {
+              let imageUrl = match[1];
+
+              // Normalize URL untuk memastikan konsistensi
+              if (imageUrl.startsWith("//")) {
+                imageUrl = "https:" + imageUrl;
+              } else if (imageUrl.startsWith("/")) {
+                imageUrl = window.location.origin + imageUrl;
+              } else if (!imageUrl.startsWith("http")) {
+                // Jika URL relatif, tambahkan base URL
+                imageUrl = window.location.origin + "/" + imageUrl.replace(/^\.\//, "");
+              }
+
+              urls.push(imageUrl);
+            }
           }
         });
 
+        console.log("Extracted URLs:", urls); // Debug log
         setImages(urls);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Terjadi kesalahan");
+        console.error("Fetch error:", err);
+        setError(err instanceof Error ? err.message : "Terjadi kesalahan saat memuat data");
       } finally {
         setLoading(false);
       }
@@ -53,6 +78,13 @@ export default function HomePage() {
   // Dapatkan gambar untuk halaman saat ini
   const startIndex = (currentPage - 1) * itemsPerPage;
   const currentImages = images.slice(startIndex, startIndex + itemsPerPage);
+
+  // Debug log untuk pagination
+  useEffect(() => {
+    console.log("Current page:", currentPage);
+    console.log("Start index:", startIndex);
+    console.log("Current images:", currentImages);
+  }, [currentPage, startIndex, currentImages]);
 
   // Fungsi untuk membuka modal
   const openImageModal = (src: string, globalIndex: number) => {
@@ -120,6 +152,31 @@ export default function HomePage() {
       document.body.style.overflow = "unset";
     };
   }, [selectedImage]);
+
+  // Handle image error dengan fallback yang lebih baik
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement>, originalSrc: string) => {
+    const target = e.target as HTMLImageElement;
+
+    // Jika belum mencoba fallback
+    if (!target.dataset.retried) {
+      target.dataset.retried = "true";
+
+      // Coba dengan protocol yang berbeda atau path yang berbeda
+      if (originalSrc.startsWith("https://")) {
+        target.src = originalSrc.replace("https://", "http://");
+      } else if (originalSrc.startsWith("http://")) {
+        target.src = originalSrc.replace("http://", "https://");
+      } else {
+        // Fallback ke placeholder
+        target.src =
+          "data:image/svg+xml,%3Csvg width='400' height='300' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' fill='%23f3f4f6'/%3E%3Ctext x='50%25' y='40%25' font-size='16' text-anchor='middle' dy='.3em' fill='%236b7280'%3E📅%3C/text%3E%3Ctext x='50%25' y='60%25' font-size='14' text-anchor='middle' dy='.3em' fill='%236b7280'%3EGambar tidak tersedia%3C/text%3E%3C/svg%3E";
+      }
+    } else {
+      // Sudah mencoba retry, gunakan placeholder
+      target.src =
+        "data:image/svg+xml,%3Csvg width='400' height='300' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' fill='%23f3f4f6'/%3E%3Ctext x='50%25' y='40%25' font-size='16' text-anchor='middle' dy='.3em' fill='%236b7280'%3E📅%3C/text%3E%3Ctext x='50%25' y='60%25' font-size='14' text-anchor='middle' dy='.3em' fill='%236b7280'%3EGambar tidak tersedia%3C/text%3E%3C/svg%3E";
+    }
+  };
 
   if (loading) {
     return (
@@ -191,7 +248,7 @@ export default function HomePage() {
                 const globalIndex = startIndex + idx;
                 return (
                   <div
-                    key={globalIndex}
+                    key={`${globalIndex}-${src}`} // Gunakan key yang lebih unik
                     className="group relative bg-white rounded-xl sm:rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-500 overflow-hidden border border-gray-100 transform hover:-translate-y-1 sm:hover:-translate-y-2"
                   >
                     <div className="relative overflow-hidden">
@@ -206,11 +263,7 @@ export default function HomePage() {
                             openImageModal(src, globalIndex);
                           }
                         }}
-                        onError={(e) => {
-                          const target = e.target as HTMLImageElement;
-                          target.src =
-                            "data:image/svg+xml,%3Csvg width='400' height='300' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' fill='%23f3f4f6'/%3E%3Ctext x='50%25' y='40%25' font-size='16' text-anchor='middle' dy='.3em' fill='%236b7280'%3E📅%3C/text%3E%3Ctext x='50%25' y='60%25' font-size='14' text-anchor='middle' dy='.3em' fill='%236b7280'%3EGambar tidak tersedia%3C/text%3E%3C/svg%3E";
-                        }}
+                        onError={(e) => handleImageError(e, src)}
                       />
 
                       {/* Gradient overlay */}
@@ -388,7 +441,7 @@ export default function HomePage() {
             {/* Gambar */}
             <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl overflow-hidden max-h-[85vh] sm:max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
               <div className="flex-1 overflow-hidden flex items-center justify-center">
-                <img src={selectedImage.src} alt={`Jadwal Ujian ${selectedImage.index + 1}`} className="w-full h-auto max-h-full object-contain" />
+                <img src={selectedImage.src} alt={`Jadwal Ujian ${selectedImage.index + 1}`} className="w-full h-auto max-h-full object-contain" onError={(e) => handleImageError(e, selectedImage.src)} />
               </div>
 
               {/* Footer modal */}
